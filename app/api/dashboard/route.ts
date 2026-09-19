@@ -8,10 +8,7 @@ export async function GET() {
     const databaseUrl = process.env.DATABASE_URL;
 
     if (!databaseUrl) {
-      return NextResponse.json(
-        { error: "ไม่พบ DATABASE_URL" },
-        { status: 500 },
-      );
+      return NextResponse.json({ error: "ไม่พบ DATABASE_URL" }, { status: 500 });
     }
 
     const sql = neon(databaseUrl);
@@ -21,7 +18,7 @@ export async function GET() {
         sql`
           SELECT
             COUNT(DISTINCT s.id)::int AS total_responses,
-            COUNT(DISTINCT s.user_id)::int AS unique_respondents,
+            COUNT(DISTINCT s.id)::int AS unique_respondents,
             ROUND(AVG(scores.score)::numeric, 2) AS overall_average,
             MAX(s.created_at) AS latest_response
           FROM survey_responses s
@@ -30,6 +27,7 @@ export async function GET() {
               (s.q1), (s.q2), (s.q3), (s.q4), (s.q5), (s.q6), (s.q7),
               (s.q8), (s.q9), (s.q10), (s.q11), (s.q12), (s.q13), (s.q14)
           ) AS scores(score)
+          WHERE scores.score IS NOT NULL
         `,
         sql`
           SELECT
@@ -72,7 +70,7 @@ export async function GET() {
       feedback: feedbackRows,
     });
   } catch (error) {
-    console.error(error);
+    console.error("dashboard api error", error);
 
     return NextResponse.json(
       { error: "เชื่อมต่อฐานข้อมูลไม่สำเร็จ" },
