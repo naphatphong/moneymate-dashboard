@@ -6,14 +6,10 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "SurveyDash · Analytics Center",
-  description: "แดชบอร์ดวิเคราะห์ผลแบบสอบถาม Q1–Q14",
+  title: "moneymate-dashboard",
+  description: "แดชบอร์ดวิเคราะห์ข้อมูลแบบสอบถาม",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
-  return (
-    <html lang="th" className={`${geistSans.variable} ${geistMono.variable}`}>
-      <body>{children}</body>
-    </html>
-  );
+  return <html lang="th" className={`${geistSans.variable} ${geistMono.variable}`}><body>{children}</body></html>;
 }
