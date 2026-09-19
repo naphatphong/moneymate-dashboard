@@ -1,39 +1,82 @@
+import { neon } from "@neondatabase/serverless";
 import { NextResponse } from "next/server";
-import { Pool } from "pg";
 
 export const dynamic = "force-dynamic";
 
-const questionColumns = Array.from({ length: 14 }, (_, index) => `q${index + 1}`);
-
 export async function GET() {
-  if (!process.env.DATABASE_URL) {
-    return NextResponse.json({ error: "ยังไม่ได้ตั้งค่า DATABASE_URL" }, { status: 500 });
-  }
-
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
-
   try {
-    const client = await pool.connect();
-    try {
-      const rows = await client.query('SELECT * FROM survey_responses ORDER BY created_at DESC');
-      const records = rows.rows;
-      const first = records[0] ?? {};
-      const respondentKey = ["respondent_id", "respondent_code", "student_id", "email"].find((key) => key in first);
-      const yearKey = ["year_level", "year", "class_level"].find((key) => key in first);
-      const feedbackKey = ["feedback", "comment", "ความคิดเห็น"].find((key) => key in first);
-      const createdKey = "created_at" in first ? "created_at" : null;
-      const questions = questionColumns
-        .filter((key) => records.some((row) => key in row))
-        .map((key) => ({ question: key.toUpperCase(), average: records.reduce((sum, row) => sum + Number(row[key] ?? 0), 0) / Math.max(records.filter((row) => row[key] != null).length, 1) }));
-      const numeric = questions.map((item) => Number(item.average)).filter(Number.isFinite);
-      const feedback = records.filter((row) => feedbackKey && row[feedbackKey]).slice(0, 5).map((row) => ({ id: Number(row.id), year_level: yearKey ? String(row[yearKey] ?? "") : null, feedback: String(row[feedbackKey!]), created_at: String(createdKey ? row[createdKey] : "") }));
-      return NextResponse.json({ summary: { total_responses: records.length, unique_respondents: respondentKey ? new Set(records.map((row) => row[respondentKey])).size : records.length, overall_average: numeric.length ? numeric.reduce((a, b) => a + b, 0) / numeric.length : 0, latest_response: createdKey && records[0] ? records[0][createdKey] : null }, yearLevels: Object.entries(records.reduce<Record<string, number>>((result, row) => { const label = yearKey ? String(row[yearKey] ?? "ไม่ระบุ") : "ไม่ระบุ"; result[label] = (result[label] ?? 0) + 1; return result; }, {})).map(([label, value]) => ({ label, value })), questions, feedback });
-    } finally {
-      client.release();
-      await pool.end();
+    const databaseUrl = process.env.DATABASE_URL;
+
+    if (!databaseUrl) {
+      return NextResponse.json(
+        { error: "ไม่พบ DATABASE_URL" },
+        { status: 500 },
+      );
     }
+
+    const sql = neon(databaseUrl);
+
+    const [summaryRows, yearLevelRows, questionRows, feedbackRows] =
+      await Promise.all([
+        sql`
+          SELECT
+            COUNT(DISTINCT s.id)::int AS total_responses,
+            COUNT(DISTINCT s.user_id)::int AS unique_respondents,
+            ROUND(AVG(scores.score)::numeric, 2) AS overall_average,
+            MAX(s.created_at) AS latest_response
+          FROM survey_responses s
+          CROSS JOIN LATERAL (
+            VALUES
+              (s.q1), (s.q2), (s.q3), (s.q4), (s.q5), (s.q6), (s.q7),
+              (s.q8), (s.q9), (s.q10), (s.q11), (s.q12), (s.q13), (s.q14)
+          ) AS scores(score)
+        `,
+        sql`
+          SELECT
+            COALESCE(NULLIF(TRIM(year_level), ''), 'ไม่ระบุ') AS label,
+            COUNT(*)::int AS value
+          FROM survey_responses
+          GROUP BY label
+          ORDER BY label
+        `,
+        sql`
+          SELECT
+            question,
+            ROUND(AVG(score)::numeric, 2) AS average
+          FROM survey_responses s
+          CROSS JOIN LATERAL (
+            VALUES
+              (1, 'Q1', s.q1), (2, 'Q2', s.q2), (3, 'Q3', s.q3),
+              (4, 'Q4', s.q4), (5, 'Q5', s.q5), (6, 'Q6', s.q6),
+              (7, 'Q7', s.q7), (8, 'Q8', s.q8), (9, 'Q9', s.q9),
+              (10, 'Q10', s.q10), (11, 'Q11', s.q11), (12, 'Q12', s.q12),
+              (13, 'Q13', s.q13), (14, 'Q14', s.q14)
+          ) AS scores(question_no, question, score)
+          WHERE score IS NOT NULL
+          GROUP BY question_no, question
+          ORDER BY question_no
+        `,
+        sql`
+          SELECT id, year_level, feedback, created_at
+          FROM survey_responses
+          WHERE NULLIF(TRIM(feedback), '') IS NOT NULL
+          ORDER BY created_at DESC
+          LIMIT 5
+        `,
+      ]);
+
+    return NextResponse.json({
+      summary: summaryRows[0],
+      yearLevels: yearLevelRows,
+      questions: questionRows,
+      feedback: feedbackRows,
+    });
   } catch (error) {
-    console.error("dashboard api error", error);
-    return NextResponse.json({ error: "ไม่สามารถอ่านข้อมูลจากตาราง survey_responses ได้" }, { status: 500 });
+    console.error(error);
+
+    return NextResponse.json(
+      { error: "เชื่อมต่อฐานข้อมูลไม่สำเร็จ" },
+      { status: 500 },
+    );
   }
 }
