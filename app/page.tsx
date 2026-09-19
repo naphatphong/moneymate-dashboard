@@ -1,115 +1,68 @@
-import { neon } from "@neondatabase/serverless";
-import { NextResponse } from "next/server";
+"use client";
 
-export const dynamic = "force-dynamic";
+import { useEffect, useState } from "react";
 
-const demoData = {
-  demo: true,
+type DashboardData = {
+  demo?: boolean;
   summary: {
-    total_responses: 142,
-    unique_respondents: 98,
-    overall_average: 4.32,
-    latest_response: new Date().toISOString(),
-  },
-  yearLevels: [
-    { label: "มัธยมศึกษาปี 1", value: 18 },
-    { label: "มัธยมศึกษาปี 2", value: 22 },
-    { label: "มัธยมศึกษาปี 3", value: 26 },
-    { label: "มัธยมศึกษาปี 4", value: 19 },
-    { label: "มัธยมศึกษาปี 5", value: 13 },
-  ],
-  questions: [
-    { question: "Q1", average: 4.4 },
-    { question: "Q2", average: 4.1 },
-    { question: "Q3", average: 4.6 },
-    { question: "Q4", average: 4.2 },
-    { question: "Q5", average: 4.5 },
-    { question: "Q6", average: 4.3 },
-    { question: "Q7", average: 4.0 },
-    { question: "Q8", average: 4.4 },
-    { question: "Q9", average: 4.7 },
-    { question: "Q10", average: 4.2 },
-    { question: "Q11", average: 4.6 },
-    { question: "Q12", average: 4.1 },
-    { question: "Q13", average: 4.3 },
-    { question: "Q14", average: 4.5 },
-  ],
-  feedback: [
-    { id: 1, year_level: "มัธยมศึกษาปี 3", feedback: "ระบบใช้งานง่ายและสวยงามมาก", created_at: new Date().toISOString() },
-    { id: 2, year_level: "มัธยมศึกษาปี 4", feedback: "ข้อมูลน่าเชื่อถือและเข้าใจง่าย", created_at: new Date(Date.now() - 86400000).toISOString() },
-    { id: 3, year_level: "มัธยมศึกษาปี 2", feedback: "อยากให้มีฟีเจอร์สำหรับแสดงกราฟเพิ่มเติม", created_at: new Date(Date.now() - 172800000).toISOString() },
-    { id: 4, year_level: "มัธยมศึกษาปี 5", feedback: "ดีมาก ควรมีการแจ้งเตือนเมื่อมีข้อมูลใหม่", created_at: new Date(Date.now() - 259200000).toISOString() },
-    { id: 5, year_level: "มัธยมศึกษาปี 1", feedback: "หน้าจัดการข้อมูลอ่านง่าย", created_at: new Date(Date.now() - 345600000).toISOString() },
-  ],
+    total_responses: number;
+    unique_respondents: number;
+    overall_average: number | string | null;
+    latest_response: string | null;
+  };
+  yearLevels: { label: string; value: number }[];
+  questions: { question: string; average: number | string }[];
+  feedback: { id: number; year_level: string | null; feedback: string; created_at: string }[];
 };
 
-export async function GET() {
-  try {
-    const databaseUrl = process.env.DATABASE_URL;
+const asNumber = (value: number | string | null | undefined) => Number(value ?? 0);
 
-    if (!databaseUrl) {
-      return NextResponse.json(demoData, { status: 200 });
-    }
+export default function Home() {
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [error, setError] = useState("");
 
-    const sql = neon(databaseUrl);
+  useEffect(() => {
+    fetch("/api/dashboard", { cache: "no-store" })
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "ไม่สามารถโหลดข้อมูลได้");
+        setData(result);
+      })
+      .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "ไม่สามารถโหลดข้อมูลได้"));
+  }, []);
 
-    const [summaryRows, yearLevelRows, questionRows, feedbackRows] =
-      await Promise.all([
-        sql`
-          SELECT
-            COUNT(DISTINCT s.id)::int AS total_responses,
-            COUNT(DISTINCT s.user_id)::int AS unique_respondents,
-            ROUND(AVG(scores.score)::numeric, 2) AS overall_average,
-            MAX(s.created_at) AS latest_response
-          FROM survey_responses s
-          CROSS JOIN LATERAL (
-            VALUES
-              (s.q1), (s.q2), (s.q3), (s.q4), (s.q5), (s.q6), (s.q7),
-              (s.q8), (s.q9), (s.q10), (s.q11), (s.q12), (s.q13), (s.q14)
-          ) AS scores(score)
-        `,
-        sql`
-          SELECT
-            COALESCE(NULLIF(TRIM(year_level), ''), 'ไม่ระบุ') AS label,
-            COUNT(*)::int AS value
-          FROM survey_responses
-          GROUP BY label
-          ORDER BY label
-        `,
-        sql`
-          SELECT
-            question,
-            ROUND(AVG(score)::numeric, 2) AS average
-          FROM survey_responses s
-          CROSS JOIN LATERAL (
-            VALUES
-              (1, 'Q1', s.q1), (2, 'Q2', s.q2), (3, 'Q3', s.q3),
-              (4, 'Q4', s.q4), (5, 'Q5', s.q5), (6, 'Q6', s.q6),
-              (7, 'Q7', s.q7), (8, 'Q8', s.q8), (9, 'Q9', s.q9),
-              (10, 'Q10', s.q10), (11, 'Q11', s.q11), (12, 'Q12', s.q12),
-              (13, 'Q13', s.q13), (14, 'Q14', s.q14)
-          ) AS scores(question_no, question, score)
-          WHERE score IS NOT NULL
-          GROUP BY question_no, question
-          ORDER BY question_no
-        `,
-        sql`
-          SELECT id, year_level, feedback, created_at
-          FROM survey_responses
-          WHERE NULLIF(TRIM(feedback), '') IS NOT NULL
-          ORDER BY created_at DESC
-          LIMIT 5
-        `,
-      ]);
-
-    return NextResponse.json({
-      summary: summaryRows[0],
-      yearLevels: yearLevelRows,
-      questions: questionRows,
-      feedback: feedbackRows,
-    });
-  } catch (error) {
-    console.error(error);
-    return NextResponse.json(demoData, { status: 200 });
+  if (error) {
+    return <main className="grid min-h-screen place-items-center bg-[#090d18] p-6 text-slate-100"><div className="rounded-2xl border border-rose-400/30 bg-[#121827] p-8 text-center"><h1 className="text-xl font-bold text-rose-300">โหลดข้อมูลไม่สำเร็จ</h1><p className="mt-3 text-slate-400">{error}</p></div></main>;
   }
+
+  if (!data) {
+    return <main className="grid min-h-screen place-items-center bg-[#090d18] text-slate-300"><p>กำลังโหลดข้อมูลแบบสอบถาม...</p></main>;
+  }
+
+  const average = asNumber(data.summary.overall_average);
+
+  return (
+    <main className="min-h-screen bg-[#090d18] p-4 text-slate-100 md:p-8">
+      <div className="mx-auto max-w-7xl">
+        <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
+          <div><p className="text-sm text-blue-400">SurveyDash / Overview</p><h1 className="mt-1 text-3xl font-bold">ภาพรวมแบบสอบถาม</h1><p className="mt-2 text-sm text-slate-500">ข้อมูลจากฐานข้อมูล survey_responses</p></div>
+          {data.demo && <span className="rounded-full bg-amber-400/10 px-3 py-1 text-xs text-amber-300">Demo Mode</span>}
+        </header>
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Card label="แบบสอบถามทั้งหมด" value={data.summary.total_responses.toLocaleString()} />
+          <Card label="ผู้ตอบแบบสอบถาม" value={data.summary.unique_respondents.toLocaleString()} />
+          <Card label="คะแนนเฉลี่ยรวม" value={`${average.toFixed(2)} / 5`} />
+          <Card label="คำถามที่วิเคราะห์" value={`${data.questions.length} ข้อ`} />
+        </section>
+        <section className="mt-6 grid gap-6 lg:grid-cols-2">
+          <Panel title="คะแนนเฉลี่ยรายคำถาม"><div className="space-y-4">{data.questions.map((item) => { const score = asNumber(item.average); return <div key={item.question} className="flex items-center gap-3"><span className="w-10 text-sm font-semibold text-blue-300">{item.question}</span><div className="h-3 flex-1 rounded-full bg-slate-700"><div className="h-3 rounded-full bg-gradient-to-r from-blue-500 to-violet-400" style={{ width: `${Math.min(100, score / 5 * 100)}%` }} /></div><span className="w-12 text-right text-sm">{score.toFixed(2)}</span></div>; })}</div></Panel>
+          <Panel title="ระดับชั้นของผู้ตอบ"><div className="space-y-4">{data.yearLevels.map((item) => <div key={item.label} className="flex justify-between rounded-xl bg-white/[0.03] p-3"><span>{item.label}</span><b>{item.value.toLocaleString()} คน</b></div>)}</div></Panel>
+        </section>
+        <Panel title="ความคิดเห็นล่าสุด" className="mt-6"><div className="grid gap-3 md:grid-cols-2">{data.feedback.length ? data.feedback.map((item) => <article key={item.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-4"><p className="text-slate-300">“{item.feedback}”</p><p className="mt-2 text-xs text-slate-500">{item.year_level || "ไม่ระบุระดับชั้น"}</p></article>) : <p className="text-slate-500">ยังไม่มีความคิดเห็น</p>}</div></Panel>
+      </div>
+    </main>
+  );
 }
+
+function Card({ label, value }: { label: string; value: string }) { return <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-blue-500/20 to-violet-500/5 p-5"><p className="text-sm text-slate-400">{label}</p><p className="mt-3 text-3xl font-bold">{value}</p></div>; }
+function Panel({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) { return <section className={`rounded-2xl border border-white/10 bg-[#111827] p-5 ${className}`}><h2 className="mb-5 font-bold">{title}</h2>{children}</section>; }
